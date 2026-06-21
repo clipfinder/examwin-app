@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>ExamWin</title>
+<meta name="theme-color" content="#0B0E14" />
+<link rel="manifest" href="manifest.json" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+  :root{
+    --bg:#0B0E14; --surface:#141925; --surface2:#1B2230; --line:#242B3A;
+    --amber:#F2A33D; --mint:#5EE6A8; --red:#FF5D5D; --text:#ECEFF5; --mute:#8B93A7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);-webkit-tap-highlight-color:transparent;}
+  #app{max-width:420px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;position:relative;}
+  button{font-family:inherit;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;position:sticky;top:0;z-index:20;background:rgba(11,14,20,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);}
+  .title{font-family:'Sora',sans-serif;font-weight:700;font-size:17px;}
+  .iconbtn{background:none;border:none;padding:6px;cursor:pointer;display:flex;color:var(--text);}
+  .screen{flex:1;overflow-y:auto;padding-bottom:8px;}
+  .hide{display:none !important;}
+  .pill{font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;font-family:'Inter',sans-serif;display:inline-block;}
+  .pill-mute{background:var(--surface2);color:var(--mute);}
+  .pill-mint{background:rgba(94,230,168,.12);color:var(--mint);}
+  .pill-amber{background:rgba(242,163,61,.14);color:var(--amber);}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;}
+  .btn-primary{width:100%;background:var(--amber);border:none;color:#1A1100;font-weight:700;font-size:15px;padding:14px;border-radius:12px;font-family:'Sora',sans-serif;cursor:pointer;}
+  .btn-primary:disabled{background:var(--surface2);color:var(--mute);cursor:not-allowed;}
+  .btn-ghost{width:100%;background:none;border:1px solid var(--line);color:var(--text);font-weight:600;font-size:14px;padding:12px;border-radius:12px;font-family:'Inter',sans-serif;cursor:pointer;}
+  input,select{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;}
+  .bottomnav{position:sticky;bottom:0;display:flex;background:var(--surface);border-top:1px solid var(--line);padding:8px 4px 10px;}
+  .navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;cursor:pointer;padding:4px 0;color:var(--mute);font-size:10px;}
+  .navbtn.active{color:var(--amber);}
+  .navbtn svg{stroke:var(--mute);}
+  .navbtn.active svg{stroke:var(--amber);}
+  .ring{position:relative;flex-shrink:0;}
+  .coin-badge{display:flex;align-items:center;gap:5px;background:rgba(242,163,61,.14);border-radius:999px;padding:5px 10px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;color:var(--amber);}
+  h2.section{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;margin:0 0 10px;color:var(--text);}
+  .examrow{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;width:100%;text-align:left;cursor:pointer;}
+  .examicon{width:42px;height:42px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-weight:800;color:#0B0E14;}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px 18px;border-radius:12px;font-size:13px;z-index:999;max-width:340px;text-align:center;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ====================== STORAGE (localStorage based, free, on-device) ====================== */
+const DB = {
+  get(key, fallback){ try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } },
+  set(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+};
+
+const RECHARGE_THRESHOLD = 1000; // coins needed to redeem
+const COINS_PER_CORRECT = 10;
+const PLAN_MONTHLY_PRICE = 99;
+const PLAN_YEARLY_PRICE = 299;
+
+function defaultState(){
+  return {
+    user: { name: "Student", phone: "", plan: null, planExpiry: null, coins: 0, streak: 0, lastRedeemMonth: null },
+    redeemRequests: [], // {id, phone, operator, amount, month, status, date}
+    isAdmin: false
+  };
+}
+
+let state = DB.get("examwin_state", defaultState());
+function save(){ DB.set("examwin_state", state); }
+
+/* ====================== QUESTION BANK ====================== */
+const QUESTIONS = [
+  { topic:"Number System", q:"What is the remainder when 7^45 is divided by 5?", options:["1","2","3","4"], answer:2 },
+  { topic:"Percentage", q:"If 30% of a number is 90, what is 45% of the same number?", options:["120","125","135","150"], answer:2 },
+  { topic:"English Grammar", q:"Choose the correctly spelled word.", options:["Occured","Occurred","Ocurred","Occurrred"], answer:1 },
+  { topic:"Reasoning", q:"Find the next number: 2, 6, 12, 20, 30, ?", options:["40","42","44","36"], answer:1 },
+  { topic:"Number System", q:"HCF of two numbers is 12, LCM is 144. If one number is 36, the other is:", options:["36","48","60","72"], answer:1 },
+  { topic:"Geography", q:"Which river is known as the 'Sorrow of Bihar'?", options:["Ganga","Kosi","Son","Gandak"], answer:1 }
+];
+
+const EXAMS = [
+  { id:"ssc-cgl", name:"SSC CGL 2026", org:"Tier I & II", tests:1986, free:3, color:"#F2A33D" },
+  { id:"delhi-police", name:"Delhi Police Constable", org:"Executive", tests:1200, free:12, color:"#5EE6A8" },
+  { id:"ibps-clerk", name:"IBPS Clerk 2026", org:"Pre + Mains", tests:324, free:1, color:"#7FB8FF" },
+  { id:"rrb-ntpc", name:"RRB NTPC Graduate", org:"CBT 1 + CBT 2", tests:1692, free:18, color:"#FF8FB1" }
+];
+
+/* ====================== ICONS ====================== */
+const ICONS = {
+  home:'<path d="M3 11l9-8 9 8M5 10v9h14v-9"/>',
+  explore:'<path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2-4.35-4.35"/>',
+  wallet:'<path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M16 12h.01"/>',
+  profile:'<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0"/>',
+  back:'<path d="M15 18l-6-6 6-6"/>',
+  chevron:'<path d="M9 6l6 6-6 6"/>',
+  close:'<path d="M6 6l12 12M18 6L6 18"/>',
+  bell:'<path d="M12 2a6 6 0 0 0-6 6v3.3c0 .6-.2 1.2-.6 1.7L4 15.5c-.6.8 0 2 1 2h14c1 0 1.6-1.2 1-2l-1.4-2.5c-.4-.5-.6-1.1-.6-1.7V8a6 6 0 0 0-6-6Z"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0"/>',
+  coin:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5h2a1.5 1.5 0 0 1 0 3h-2m0 0h2.5m-1.25-6v1m0 8.5v1"/>'
+};
+function icon(name, size=20, stroke="var(--text)"){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+}
+
+/* ====================== ROUTER STATE ====================== */
+let nav = "home";
+let screen = { name: "home" };
+let testAnswers = {};
+let testIdx = 0;
+let testSeconds = 600;
+let testTimer = null;
+
+function go(s){ screen = s; render(); }
+function setNav(n){ nav = n; screen = { name: n }; render(); }
+
+/* ====================== STREAK RING ====================== */
+function streakRing(size, progress, streak, initials){
+  const r = size/2 - 4, c = 2*Math.PI*r, off = c*(1-progress);
+  return `
+  <div class="ring" style="width:${size}px;height:${size}px;">
+    <svg width="${size}" height="${size}" style="position:absolute;top:0;left:0;transform:rotate(-90deg);">
+      <circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="var(--line)" stroke-width="3" fill="none"/>
+      <circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="var(--amber)" stroke-width="3" fill="none"
+        stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round"/>
+    </svg>
+    <div style="position:absolute;inset:4px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-family:'Sora';font-weight:700;color:var(--amber);">${initials}</div>
+    ${streak>0?`<div style="position:absolute;bottom:-4px;right:-4px;background:var(--amber);color:#1A1100;font-size:10px;font-weight:800;border-radius:10px;padding:1px 5px;border:2px solid var(--bg);font-family:'Sora';">${streak}</div>`:''}
+  </div>`;
+}
+
+/* ====================== SCREENS ====================== */
+function screenHome(){
+  const u = state.user;
+  const progress = Math.min(1, (u.coins % RECHARGE_THRESHOLD) / RECHARGE_THRESHOLD);
+  return `
+  <div style="padding:16px 16px 4px;display:flex;align-items:center;gap:12px;justify-content:space-between;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      ${streakRing(56, progress, u.streak, u.name[0]||"S")}
+      <div>
+        <div style="color:var(--mute);font-size:12px;">Welcome back</div>
+        <div style="color:var(--text);font-weight:700;font-family:'Sora';font-size:16px;">${u.name}</div>
+      </div>
+    </div>
+    <div class="coin-badge">${icon('coin',15,'var(--amber)')} ${u.coins}</div>
+  </div>
+
+  <div style="margin:14px 16px 0;background:linear-gradient(135deg,#1B2230,#141925);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="color:var(--text);font-family:'Sora';font-weight:700;font-size:15px;">${u.streak}-day streak</div>
+      <div style="color:var(--mute);font-size:12px;margin-top:2px;">Solve questions to fill your coin ring</div>
+    </div>
+    <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="go({name:'play'})">Practice</button>
+  </div>
+
+  ${!u.plan ? `
+  <div style="margin:14px 16px 0;background:rgba(242,163,61,.08);border:1px solid rgba(242,163,61,.3);border-radius:14px;padding:14px;">
+    <div style="color:var(--amber);font-weight:700;font-family:'Sora';font-size:13px;">No active plan</div>
+    <div style="color:var(--mute);font-size:12px;margin-top:4px;">Take a Pass to unlock coin redeem &amp; full mock tests</div>
+    <button class="btn-primary" style="margin-top:10px;padding:10px;font-size:13px;" onclick="setNav('wallet')">View Plans</button>
+  </div>` : ''}
+
+  <h2 class="section" style="margin:22px 16px 10px;">Test series for you</h2>
+  <div style="display:flex;flex-direction:column;gap:10px;padding:0 16px;">
+    ${EXAMS.map(e=>`
+      <button class="examrow" onclick='go({name:"series", exam:${JSON.stringify(e)}})'>
+        <div class="examicon" style="background:${e.color};">${e.name[0]}</div>
+        <div style="flex:1;">
+          <div style="color:var(--text);font-weight:600;font-size:13.5px;">${e.name}</div>
+          <div style="color:var(--mute);font-size:11.5px;margin-top:2px;">${e.tests} total tests</div>
+        </div>
+        <span class="pill pill-mint">${e.free} free</span>
+      </button>
+    `).join('')}
+  </div>`;
+}
+
+function screenExplore(){
+  return `
+  <div style="padding:16px;">
+    <input id="exploreSearch" placeholder="Search exams..." oninput="renderExploreList(this.value)" />
+    <div id="exploreList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;"></div>
+  </div>`;
+}
+function renderExploreList(q=""){
+  const list = document.getElementById('exploreList');
+  if(!list) return;
+  const filtered = EXAMS.filter(e=>e.name.toLowerCase().includes(q.toLowerCase()));
+  list.innerHTML = filtered.map(e=>`
+    <button class="examrow" onclick='go({name:"series", exam:${JSON.stringify(e)}})'>
+      <div class="examicon" style="background:${e.color};">${e.name[0]}</div>
+      <div style="flex:1;">
+        <div style="color:var(--text);font-weight:600;font-size:13.5px;">${e.name}</div>
+        <div style="color:var(--mute);font-size:11.5px;margin-top:2px;">${e.org} · ${e.tests} tests</div>
+      </div>
+      <span class="pill pill-amber">${e.free} free</span>
+    </button>
+  `).join('') || `<div style="color:var(--mute);text-align:center;padding:40px 0;font-size:13px;">No exams found.</div>`;
+}
+
+function screenSeriesDetail(exam){
+  return `
+  <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);">
+    <button class="iconbtn" onclick="setNav(nav)">${icon('back')}</button>
+    <div style="font-family:'Sora';font-weight:700;font-size:15px;">${exam.name}</div>
+  </div>
+  <div style="padding:16px;">
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <span class="pill pill-amber">${exam.tests} total tests</span>
+      <span class="pill pill-mint">${exam.free} free</span>
+    </div>
+    <div style="display:flex;flex-direction:column;">
+      ${[["Live Test",2,2],["Chapter Test",245,1],["Sectional Test",80,0],["Full Test",30,0]].map(([l,n,f])=>`
+        <button onclick="go({name:'play'})" style="display:flex;justify-content:space-between;align-items:center;padding:16px 4px;border-bottom:1px solid var(--line);background:none;border-left:none;border-right:none;border-top:none;cursor:pointer;text-align:left;width:100%;color:var(--text);">
+          <div style="font-size:14px;"><b>${n}</b> ${l}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${f>0?`<span class="pill pill-mint">${f} free</span>`:''}
+            ${icon('chevron',16,'var(--mute)')}
+          </div>
+        </button>
+      `).join('')}
+    </div>
+    <button class="btn-primary" style="margin-top:20px;" onclick="go({name:'play'})">Start free test</button>
+  </div>`;
+}
+
+function screenPlay(){
+  testIdx = 0; testAnswers = {}; testSeconds = 600;
+  setTimeout(()=>{ startTimer(); renderQuestion(); }, 0);
+  return `
+  <div style="display:flex;flex-direction:column;min-height:100%;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);">
+      <button class="iconbtn" onclick="exitTest()">${icon('close')}</button>
+      <div id="timerDisplay" style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:16px;letter-spacing:1px;">10:00</div>
+      <div id="qCounter" style="font-size:12px;color:var(--mute);">1/${QUESTIONS.length}</div>
+    </div>
+    <div style="height:3px;background:var(--line);"><div id="qProgress" style="height:100%;width:0%;background:var(--amber);transition:width .3s;"></div></div>
+    <div id="questionArea" style="flex:1;padding:24px 20px;"></div>
+    <div style="padding:16px;">
+      <button class="btn-primary" id="nextBtn" onclick="nextQuestion()">Save & Next</button>
+    </div>
+  </div>`;
+}
+function startTimer(){
+  clearInterval(testTimer);
+  testTimer = setInterval(()=>{
+    testSeconds--;
+    const mm = String(Math.floor(testSeconds/60)).padStart(2,'0');
+    const ss = String(testSeconds%60).padStart(2,'0');
+    const td = document.getElementById('timerDisplay');
+    if(td){ td.textContent = `${mm}:${ss}`; td.style.color = testSeconds<60 ? 'var(--red)' : 'var(--text)'; }
+    if(testSeconds<=0){ clearInterval(testTimer); finishTest(); }
+  },1000);
+}
+function renderQuestion(){
+  const q = QUESTIONS[testIdx];
+  const area = document.getElementById('questionArea');
+  if(!area) return;
+  area.innerHTML = `
+    <span class="pill pill-amber">${q.topic}</span>
+    <div style="color:var(--text);font-size:17px;font-family:'Sora';font-weight:600;line-height:1.45;margin:16px 0 22px;">${q.q}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      ${q.options.map((opt,i)=>{
+        const selected = testAnswers[testIdx]===i;
+        return `<button onclick="selectOption(${i})" style="display:flex;align-items:center;gap:12px;text-align:left;background:${selected?'rgba(242,163,61,.12)':'var(--surface)'};border:1.5px solid ${selected?'var(--amber)':'var(--line)'};border-radius:12px;padding:14px;cursor:pointer;width:100%;color:var(--text);font-size:14px;">
+          <div style="width:22px;height:22px;border-radius:50%;border:1.5px solid ${selected?'var(--amber)':'var(--mute)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            ${selected?'<div style="width:11px;height:11px;border-radius:50%;background:var(--amber);"></div>':''}
+          </div>
+          <span>${opt}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  document.getElementById('qCounter').textContent = `${testIdx+1}/${QUESTIONS.length}`;
+  document.getElementById('qProgress').style.width = `${((testIdx+1)/QUESTIONS.length)*100}%`;
+  document.getElementById('nextBtn').textContent = testIdx<QUESTIONS.length-1 ? "Save & Next" : "Submit Test";
+}
+function selectOption(i){ testAnswers[testIdx]=i; renderQuestion(); }
+function nextQuestion(){
+  if(testIdx<QUESTIONS.length-1){ testIdx++; renderQuestion(); }
+  else finishTest();
+}
+function exitTest(){ clearInterval(testTimer); setNav(nav); }
+function finishTest(){
+  clearInterval(testTimer);
+  // award coins for correct answers
+  let correct = 0;
+  QUESTIONS.forEach((q,i)=>{ if(testAnswers[i]===q.answer) correct++; });
+  state.user.coins += correct * COINS_PER_CORRECT;
+  state.user.streak += 1;
+  save();
+  go({name:'results'});
+}
+
+function screenResults(){
+  const byTopic = {};
+  QUESTIONS.forEach((q,i)=>{
+    if(!byTopic[q.topic]) byTopic[q.topic] = {correct:0,total:0};
+    byTopic[q.topic].total++;
+    if(testAnswers[i]===q.answer) byTopic[q.topic].correct++;
+  });
+  const total = QUESTIONS.length;
+  const correctCount = Object.values(byTopic).reduce((a,b)=>a+b.correct,0);
+  const weakest = Object.entries(byTopic).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total))[0];
+  return `
+  <div style="padding:16px;">
+    <div style="text-align:center;padding:24px 0;">
+      <div style="font-family:'Sora';font-weight:800;font-size:40px;color:var(--amber);">${correctCount}/${total}</div>
+      <div style="color:var(--mute);font-size:13px;margin-top:4px;">questions correct · +${correctCount*COINS_PER_CORRECT} coins earned</div>
+    </div>
+    <h2 class="section">Weak Topic Radar</h2>
+    <div style="color:var(--mute);font-size:12px;margin-bottom:14px;">Where to spend your next study hour</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      ${Object.entries(byTopic).map(([topic,s])=>{
+        const pct = s.total ? (s.correct/s.total)*100 : 0;
+        const tone = pct>=70?'var(--mint)':pct>=40?'var(--amber)':'var(--red)';
+        return `<div class="card">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:600;">${topic}</span>
+            <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;color:${tone};">${s.correct}/${s.total}</span>
+          </div>
+          <div style="height:6px;background:var(--line);border-radius:99px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${tone};"></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ${weakest?`<div style="margin-top:18px;background:rgba(255,93,93,.08);border:1px solid rgba(255,93,93,.3);border-radius:12px;padding:14px;">
+      <div style="color:var(--red);font-size:13px;font-weight:700;font-family:'Sora';">Focus next: ${weakest[0]}</div>
+      <div style="color:var(--mute);font-size:12px;margin-top:4px;">You got ${weakest[1].correct} of ${weakest[1].total} right here.</div>
+    </div>`:''}
+    <button class="btn-primary" style="margin-top:20px;" onclick="setNav('home')">Back to home</button>
+  </div>`;
+}
+
+function screenWallet(){
+  const u = state.user;
+  const planActive = u.plan && u.planExpiry && new Date(u.planExpiry) > new Date();
+  const canRedeem = planActive && u.coins >= RECHARGE_THRESHOLD && (u.lastRedeemMonth !== currentMonthKey());
+  return `
+  <div style="padding:16px;">
+    <div class="card" style="text-align:center;padding:24px 16px;margin-bottom:16px;">
+      ${icon('coin',32,'var(--amber)')}
+      <div style="font-family:'Sora';font-weight:800;font-size:28px;color:var(--amber);margin-top:8px;">${u.coins}</div>
+      <div style="color:var(--mute);font-size:12px;margin-top:2px;">coins · earn ${COINS_PER_CORRECT} per correct answer</div>
+    </div>
+
+    ${!planActive ? `
+    <h2 class="section">Choose a Pass</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;font-family:'Sora';font-size:15px;">Monthly Pass</div>
+          <div style="color:var(--mute);font-size:12px;margin-top:2px;">₹${PLAN_MONTHLY_PRICE}/month</div>
+        </div>
+        <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="buyPlan('monthly')">Choose</button>
+      </div>
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;border-color:var(--amber);">
+        <div>
+          <div style="font-weight:700;font-family:'Sora';font-size:15px;">Yearly Pass <span class="pill pill-mint" style="margin-left:6px;">Best value</span></div>
+          <div style="color:var(--mute);font-size:12px;margin-top:2px;">₹${PLAN_YEARLY_PRICE}/year</div>
+        </div>
+        <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="buyPlan('yearly')">Choose</button>
+      </div>
+    </div>
+    <div style="color:var(--mute);font-size:11.5px;text-align:center;">Demo only — no real payment is processed here.</div>
+    ` : `
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;font-family:'Sora';font-size:14px;">${u.plan==='yearly'?'Yearly':'Monthly'} Pass active</div>
+          <div style="color:var(--mute);font-size:11.5px;margin-top:2px;">Expires ${new Date(u.planExpiry).toLocaleDateString()}</div>
+        </div>
+        <span class="pill pill-mint">Active</span>
+      </div>
+    </div>
+
+    <h2 class="section">Recharge Redeem</h2>
+    <div class="card" style="margin-bottom:10px;">
+      <div style="font-size:13px;color:var(--mute);line-height:1.5;">
+        Reach <b style="color:var(--text);">${RECHARGE_THRESHOLD} coins</b> to redeem a monthly data recharge.<br/>
+        One redeem allowed per month. ${u.lastRedeemMonth===currentMonthKey() ? '<span style="color:var(--amber);">You already redeemed this month.</span>' : ''}
+      </div>
+      <div style="height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px;">
+        <div style="width:${Math.min(100,(u.coins/RECHARGE_THRESHOLD)*100)}%;height:100%;background:var(--amber);"></div>
+      </div>
+    </div>
+    <button class="btn-primary" ${canRedeem?'':'disabled'} onclick="openRedeemForm()">
+      ${canRedeem ? 'Redeem Recharge' : (u.lastRedeemMonth===currentMonthKey() ? 'Already redeemed this month' : `Need ${Math.max(0,RECHARGE_THRESHOLD-u.coins)} more coins`)}
+    </button>
+    `}
+
+    <div id="redeemFormArea" style="margin-top:16px;"></div>
+
+    <h2 class="section" style="margin-top:26px;">Your Redeem History</h2>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${state.redeemRequests.filter(r=>r.phone===u.phone).length===0 ? `<div style="color:var(--mute);font-size:12.5px;text-align:center;padding:14px 0;">No redeem requests yet.</div>` :
+      state.redeemRequests.filter(r=>r.phone===u.phone).map(r=>`
+        <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:13px;font-weight:600;">${r.operator} · ₹${r.amount}</div>
+            <div style="color:var(--mute);font-size:11px;margin-top:2px;">${r.date}</div>
+          </div>
+          <span class="pill ${r.status==='Done'?'pill-mint':'pill-amber'}">${r.status}</span>
+        </div>
+      `).join('')}
+    </div>
+  </div>`;
+}
+
+function currentMonthKey(){
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth()}`;
+}
+
+function buyPlan(type){
+  const u = state.user;
+  const now = new Date();
+  if(type==='monthly') now.setMonth(now.getMonth()+1);
+  else now.setFullYear(now.getFullYear()+1);
+  u.plan = type;
+  u.planExpiry = now.toISOString();
+  save();
+  toast(`${type==='monthly'?'Monthly':'Yearly'} pass activated (demo)`);
+  render();
+}
+
+function openRedeemForm(){
+  const area = document.getElementById('redeemFormArea');
+  area.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700;font-family:'Sora';font-size:14px;margin-bottom:12px;">Redeem details</div>
+      <input id="redeemPhone" placeholder="Mobile number to recharge" style="margin-bottom:10px;" maxlength="10" />
+      <select id="redeemOperator" style="margin-bottom:10px;">
+        <option value="Jio">Jio</option>
+        <option value="Airtel">Airtel</option>
+        <option value="Vi">Vi</option>
+        <option value="BSNL">BSNL</option>
+      </select>
+      <div style="color:var(--mute);font-size:12px;margin-bottom:12px;">Plan: 1.5GB monthly pack (₹49 — fixed)</div>
+      <button class="btn-primary" onclick="submitRedeem()">Submit Request</button>
+    </div>`;
+}
+
+function submitRedeem(){
+  const phone = document.getElementById('redeemPhone').value.trim();
+  const operator = document.getElementById('redeemOperator').value;
+  if(phone.length!==10){ toast("Enter a valid 10-digit number"); return; }
+  const u = state.user;
+  state.redeemRequests.push({
+    id: Date.now(),
+    phone: phone,
+    operator,
+    amount: 49,
+    month: currentMonthKey(),
+    status: "Pending",
+    date: new Date().toLocaleDateString()
+  });
+  u.coins -= RECHARGE_THRESHOLD;
+  u.lastRedeemMonth = currentMonthKey();
+  u.phone = phone;
+  save();
+  toast("Redeem request submitted! You'll be notified once processed.");
+  setNav('wallet');
+}
+
+function screenProfile(){
+  const u = state.user;
+  return `
+  <div style="padding:20px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);">
+    ${streakRing(64, Math.min(1,(u.coins%RECHARGE_THRESHOLD)/RECHARGE_THRESHOLD), u.streak, u.name[0]||'S')}
+    <div>
+      <div style="font-weight:700;font-family:'Sora';font-size:16px;">${u.name}</div>
+      <div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${u.phone||'No phone set'}</div>
+      <div style="color:var(--amber);font-size:12px;margin-top:4px;">${u.streak}-day streak · ${u.coins} coins</div>
+    </div>
+  </div>
+  <div style="padding:8px 16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;border-bottom:1px solid var(--line);">
+      <span style="font-size:14px;">Edit name</span>
+      <button class="iconbtn" onclick="editName()">${icon('chevron',16,'var(--mute)')}</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;border-bottom:1px solid var(--line);">
+      <span style="font-size:14px;">Admin panel</span>
+      <button class="iconbtn" onclick="setNav('admin')">${icon('chevron',16,'var(--mute)')}</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;">
+      <span style="font-size:14px;color:var(--red);">Reset app data</span>
+      <button class="iconbtn" onclick="resetData()">${icon('chevron',16,'var(--mute)')}</button>
+    </div>
+  </div>`;
+}
+function editName(){
+  const n = prompt("Enter your name:", state.user.name);
+  if(n){ state.user.name = n; save(); render(); }
+}
+function resetData(){
+  if(confirm("This will erase all local progress. Continue?")){
+    state = defaultState(); save(); render();
+  }
+}
+
+/* Simple owner-only admin screen — for YOU to see redeem requests */
+function screenAdmin(){
+  const pending = state.redeemRequests.filter(r=>r.status==='Pending');
+  const done = state.redeemRequests.filter(r=>r.status==='Done');
+  return `
+  <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);">
+    <button class="iconbtn" onclick="setNav('profile')">${icon('back')}</button>
+    <div style="font-family:'Sora';font-weight:700;font-size:15px;">Admin · Redeem Requests</div>
+  </div>
+  <div style="padding:16px;">
+    <div style="color:var(--mute);font-size:12px;margin-bottom:14px;">This list is stored only on this device. When you see a pending request, manually recharge that number from your Paytm, then mark it Done here.</div>
+    <h2 class="section">Pending (${pending.length})</h2>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+      ${pending.length===0?`<div style="color:var(--mute);font-size:12.5px;">No pending requests.</div>`:
+      pending.map(r=>`
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;">
+            <div>
+              <div style="font-weight:700;font-size:14px;">${r.phone} · ${r.operator}</div>
+              <div style="color:var(--mute);font-size:11.5px;margin-top:2px;">₹${r.amount} pack · requested ${r.date}</div>
+            </div>
+            <button class="pill pill-mint" style="border:none;cursor:pointer;" onclick="markDone(${r.id})">Mark Done</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <h2 class="section">Completed (${done.length})</h2>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${done.map(r=>`<div class="card" style="opacity:.6;"><div style="font-size:13px;">${r.phone} · ${r.operator} · ₹${r.amount}</div></div>`).join('') || `<div style="color:var(--mute);font-size:12.5px;">None yet.</div>`}
+    </div>
+  </div>`;
+}
+function markDone(id){
+  const r = state.redeemRequests.find(x=>x.id===id);
+  if(r){ r.status = 'Done'; save(); render(); }
+}
+
+/* ====================== TOAST ====================== */
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2600);
+}
+
+/* ====================== TOP BAR / BOTTOM NAV ====================== */
+function topBar(title){
+  return `<div class="topbar"><div class="title">${title}</div><button class="iconbtn">${icon('bell')}</button></div>`;
+}
+function bottomNav(){
+  const items = [
+    {id:'home', label:'Home', icon:'home'},
+    {id:'explore', label:'Explore', icon:'explore'},
+    {id:'wallet', label:'Wallet', icon:'wallet'},
+    {id:'profile', label:'Profile', icon:'profile'}
+  ];
+  return `<div class="bottomnav">
+    ${items.map(it=>`
+      <button class="navbtn ${nav===it.id?'active':''}" onclick="setNav('${it.id}')">
+        ${icon(it.icon,20, nav===it.id?'var(--amber)':'var(--mute)')}
+        <span>${it.label}</span>
+      </button>`).join('')}
+  </div>`;
+}
+
+/* ====================== MAIN RENDER ====================== */
+function render(){
+  const app = document.getElementById('app');
+  let body = '', title = 'ExamWin', showChrome = true;
+
+  if(screen.name==='series'){ body = screenSeriesDetail(screen.exam); showChrome=false; }
+  else if(screen.name==='play'){ body = screenPlay(); showChrome=false; }
+  else if(screen.name==='results'){ body = screenResults(); showChrome=false; }
+  else if(screen.name==='admin'){ body = screenAdmin(); showChrome=false; }
+  else if(nav==='home'){ body = screenHome(); title='ExamWin'; }
+  else if(nav==='explore'){ body = screenExplore(); title='Explore exams'; }
+  else if(nav==='wallet'){ body = screenWallet(); title='Wallet'; }
+  else if(nav==='profile'){ body = screenProfile(); title='Profile'; }
+
+  app.innerHTML = `
+    ${showChrome ? topBar(title) : ''}
+    <div class="screen">${body}</div>
+    ${showChrome ? bottomNav() : ''}
+  `;
+  if(nav==='explore' && screen.name==='explore') renderExploreList();
+}
+
+render();
+</script>
+</body>
+</html>

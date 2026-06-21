@@ -1,0 +1,22 @@
+{
+  "name": "ExamWin - Exam Prep & Rewards",
+  "short_name": "ExamWin",
+  "description": "Practice mock tests, earn coins, redeem mobile recharge",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0B0E14",
+  "theme_color": "#0B0E14",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
