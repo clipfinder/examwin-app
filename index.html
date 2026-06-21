@@ -6,6 +6,11 @@
 <title>ExamWin</title>
 <meta name="theme-color" content="#0B0E14" />
 <link rel="manifest" href="manifest.json" />
+
+<!-- Firebase (free Google database) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
   :root{
@@ -20,7 +25,6 @@
   .title{font-family:'Sora',sans-serif;font-weight:700;font-size:17px;}
   .iconbtn{background:none;border:none;padding:6px;cursor:pointer;display:flex;color:var(--text);}
   .screen{flex:1;overflow-y:auto;padding-bottom:8px;}
-  .hide{display:none !important;}
   .pill{font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;font-family:'Inter',sans-serif;display:inline-block;}
   .pill-mute{background:var(--surface2);color:var(--mute);}
   .pill-mint{background:rgba(94,230,168,.12);color:var(--mint);}
@@ -29,48 +33,77 @@
   .btn-primary{width:100%;background:var(--amber);border:none;color:#1A1100;font-weight:700;font-size:15px;padding:14px;border-radius:12px;font-family:'Sora',sans-serif;cursor:pointer;}
   .btn-primary:disabled{background:var(--surface2);color:var(--mute);cursor:not-allowed;}
   .btn-ghost{width:100%;background:none;border:1px solid var(--line);color:var(--text);font-weight:600;font-size:14px;padding:12px;border-radius:12px;font-family:'Inter',sans-serif;cursor:pointer;}
-  input,select{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;}
+  input,select,textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;}
+  textarea{font-family:'JetBrains Mono',monospace;font-size:12.5px;min-height:160px;resize:vertical;}
   .bottomnav{position:sticky;bottom:0;display:flex;background:var(--surface);border-top:1px solid var(--line);padding:8px 4px 10px;}
   .navbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;cursor:pointer;padding:4px 0;color:var(--mute);font-size:10px;}
   .navbtn.active{color:var(--amber);}
-  .navbtn svg{stroke:var(--mute);}
-  .navbtn.active svg{stroke:var(--amber);}
   .ring{position:relative;flex-shrink:0;}
   .coin-badge{display:flex;align-items:center;gap:5px;background:rgba(242,163,61,.14);border-radius:999px;padding:5px 10px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;color:var(--amber);}
   h2.section{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;margin:0 0 10px;color:var(--text);}
   .examrow{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;width:100%;text-align:left;cursor:pointer;}
   .examicon{width:42px;height:42px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-weight:800;color:#0B0E14;}
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px 18px;border-radius:12px;font-size:13px;z-index:999;max-width:340px;text-align:center;}
+  .loadingdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div style="padding:60px 20px;text-align:center;color:var(--mute);font-size:13px;">Connecting <span class="loadingdot"></span></div></div>
 
 <script>
-/* ====================== STORAGE (localStorage based, free, on-device) ====================== */
-const DB = {
+/* ====================================================================
+   FIREBASE SETUP
+   ⚠️ IMPORTANT: Replace the firebaseConfig below with YOUR OWN config
+   from your Firebase project (Step-by-step instructions given by Claude
+   in chat). Until you do this, the app runs in LOCAL-ONLY demo mode.
+==================================================================== */
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+};
+
+let FIREBASE_READY = false;
+let db = null;
+try {
+  if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    FIREBASE_READY = true;
+  }
+} catch (e) {
+  console.error("Firebase init failed", e);
+}
+
+/* ====================================================================
+   LOCAL FALLBACK STORAGE (used until Firebase is configured, or offline)
+==================================================================== */
+const LocalDB = {
   get(key, fallback){ try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } },
   set(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
 };
 
-const RECHARGE_THRESHOLD = 1000; // coins needed to redeem
+const RECHARGE_THRESHOLD = 1000;
 const COINS_PER_CORRECT = 10;
 const PLAN_MONTHLY_PRICE = 99;
 const PLAN_YEARLY_PRICE = 299;
+const ADMIN_PHONE = "0000000000"; // change this to YOUR phone number to unlock admin panel
 
-function defaultState(){
-  return {
-    user: { name: "Student", phone: "", plan: null, planExpiry: null, coins: 0, streak: 0, lastRedeemMonth: null },
-    redeemRequests: [], // {id, phone, operator, amount, month, status, date}
-    isAdmin: false
-  };
+function defaultUser(){
+  return { name: "Student", phone: "", plan: null, planExpiry: null, coins: 0, streak: 0, lastRedeemMonth: null };
 }
 
-let state = DB.get("examwin_state", defaultState());
-function save(){ DB.set("examwin_state", state); }
+let currentPhone = LocalDB.get("examwin_phone", null);
+let state = {
+  user: LocalDB.get("examwin_user", defaultUser()),
+  redeemRequests: LocalDB.get("examwin_redeems", []),
+  questions: LocalDB.get("examwin_questions", null)
+};
 
-/* ====================== QUESTION BANK ====================== */
-const QUESTIONS = [
+/* Default starter questions if none added yet */
+const SEED_QUESTIONS = [
   { topic:"Number System", q:"What is the remainder when 7^45 is divided by 5?", options:["1","2","3","4"], answer:2 },
   { topic:"Percentage", q:"If 30% of a number is 90, what is 45% of the same number?", options:["120","125","135","150"], answer:2 },
   { topic:"English Grammar", q:"Choose the correctly spelled word.", options:["Occured","Occurred","Ocurred","Occurrred"], answer:1 },
@@ -78,7 +111,60 @@ const QUESTIONS = [
   { topic:"Number System", q:"HCF of two numbers is 12, LCM is 144. If one number is 36, the other is:", options:["36","48","60","72"], answer:1 },
   { topic:"Geography", q:"Which river is known as the 'Sorrow of Bihar'?", options:["Ganga","Kosi","Son","Gandak"], answer:1 }
 ];
+if(!state.questions) state.questions = SEED_QUESTIONS;
 
+function saveLocal(){
+  LocalDB.set("examwin_user", state.user);
+  LocalDB.set("examwin_redeems", state.redeemRequests);
+  LocalDB.set("examwin_questions", state.questions);
+}
+
+/* ====================================================================
+   SYNC LAYER — writes to Firebase if configured, else local only
+==================================================================== */
+function syncUser(){
+  saveLocal();
+  if(FIREBASE_READY && currentPhone){
+    db.ref('users/'+currentPhone).set(state.user);
+  }
+}
+function syncRedeemRequest(req){
+  saveLocal();
+  if(FIREBASE_READY){
+    db.ref('redeemRequests/'+req.id).set(req);
+  }
+}
+function syncMarkDone(id){
+  if(FIREBASE_READY){
+    db.ref('redeemRequests/'+id+'/status').set('Done');
+  }
+}
+function syncQuestions(){
+  saveLocal();
+  if(FIREBASE_READY){
+    db.ref('questions').set(state.questions);
+  }
+}
+
+function loadFromFirebase(callback){
+  if(!FIREBASE_READY || !currentPhone){ callback(); return; }
+  db.ref('users/'+currentPhone).once('value').then(snap=>{
+    const remote = snap.val();
+    if(remote) state.user = remote;
+    db.ref('redeemRequests').once('value').then(snap2=>{
+      const all = snap2.val() || {};
+      state.redeemRequests = Object.values(all);
+      db.ref('questions').once('value').then(snap3=>{
+        const q = snap3.val();
+        if(q && q.length) state.questions = q;
+        saveLocal();
+        callback();
+      });
+    });
+  }).catch(()=>callback());
+}
+
+/* ====================== EXAMS (static demo catalog) ====================== */
 const EXAMS = [
   { id:"ssc-cgl", name:"SSC CGL 2026", org:"Tier I & II", tests:1986, free:3, color:"#F2A33D" },
   { id:"delhi-police", name:"Delhi Police Constable", org:"Executive", tests:1200, free:12, color:"#5EE6A8" },
@@ -105,10 +191,7 @@ function icon(name, size=20, stroke="var(--text)"){
 /* ====================== ROUTER STATE ====================== */
 let nav = "home";
 let screen = { name: "home" };
-let testAnswers = {};
-let testIdx = 0;
-let testSeconds = 600;
-let testTimer = null;
+let testAnswers = {}, testIdx = 0, testSeconds = 600, testTimer = null, activeQuestionSet = [];
 
 function go(s){ screen = s; render(); }
 function setNav(n){ nav = n; screen = { name: n }; render(); }
@@ -128,6 +211,32 @@ function streakRing(size, progress, streak, initials){
   </div>`;
 }
 
+/* ====================== LOGIN GATE (phone number = identity) ====================== */
+function screenLogin(){
+  return `
+  <div style="padding:40px 24px;display:flex;flex-direction:column;min-height:100vh;justify-content:center;">
+    <div style="text-align:center;margin-bottom:30px;">
+      <div style="font-family:'Sora';font-weight:800;font-size:28px;color:var(--amber);">ExamWin</div>
+      <div style="color:var(--mute);font-size:13px;margin-top:6px;">Practice. Earn coins. Redeem recharge.</div>
+    </div>
+    <input id="loginPhone" placeholder="Enter your mobile number" maxlength="10" style="margin-bottom:12px;" />
+    <input id="loginName" placeholder="Your name" style="margin-bottom:16px;" />
+    <button class="btn-primary" onclick="doLogin()">Continue</button>
+    <div style="color:var(--mute);font-size:11px;text-align:center;margin-top:16px;">No OTP in this demo — your number is just your ID.</div>
+  </div>`;
+}
+function doLogin(){
+  const phone = document.getElementById('loginPhone').value.trim();
+  const name = document.getElementById('loginName').value.trim() || "Student";
+  if(phone.length!==10){ toast("Enter a valid 10-digit number"); return; }
+  currentPhone = phone;
+  LocalDB.set("examwin_phone", phone);
+  state.user.phone = phone;
+  state.user.name = name;
+  document.getElementById('app').innerHTML = `<div style="padding:60px 20px;text-align:center;color:var(--mute);font-size:13px;">Loading your data <span class="loadingdot"></span></div>`;
+  loadFromFirebase(()=>{ syncUser(); render(); });
+}
+
 /* ====================== SCREENS ====================== */
 function screenHome(){
   const u = state.user;
@@ -135,7 +244,7 @@ function screenHome(){
   return `
   <div style="padding:16px 16px 4px;display:flex;align-items:center;gap:12px;justify-content:space-between;">
     <div style="display:flex;align-items:center;gap:12px;">
-      ${streakRing(56, progress, u.streak, u.name[0]||"S")}
+      ${streakRing(56, progress, u.streak, (u.name[0]||"S").toUpperCase())}
       <div>
         <div style="color:var(--mute);font-size:12px;">Welcome back</div>
         <div style="color:var(--text);font-weight:700;font-family:'Sora';font-size:16px;">${u.name}</div>
@@ -144,12 +253,14 @@ function screenHome(){
     <div class="coin-badge">${icon('coin',15,'var(--amber)')} ${u.coins}</div>
   </div>
 
+  ${!FIREBASE_READY ? `<div style="margin:12px 16px 0;background:rgba(255,93,93,.08);border:1px solid rgba(255,93,93,.3);border-radius:10px;padding:10px 12px;color:var(--red);font-size:11.5px;">Demo mode: data saved only on this phone. Connect Firebase to sync across devices.</div>` : ''}
+
   <div style="margin:14px 16px 0;background:linear-gradient(135deg,#1B2230,#141925);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:space-between;">
     <div>
       <div style="color:var(--text);font-family:'Sora';font-weight:700;font-size:15px;">${u.streak}-day streak</div>
       <div style="color:var(--mute);font-size:12px;margin-top:2px;">Solve questions to fill your coin ring</div>
     </div>
-    <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="go({name:'play'})">Practice</button>
+    <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="startTest(state.questions)">Practice</button>
   </div>
 
   ${!u.plan ? `
@@ -210,7 +321,7 @@ function screenSeriesDetail(exam){
     </div>
     <div style="display:flex;flex-direction:column;">
       ${[["Live Test",2,2],["Chapter Test",245,1],["Sectional Test",80,0],["Full Test",30,0]].map(([l,n,f])=>`
-        <button onclick="go({name:'play'})" style="display:flex;justify-content:space-between;align-items:center;padding:16px 4px;border-bottom:1px solid var(--line);background:none;border-left:none;border-right:none;border-top:none;cursor:pointer;text-align:left;width:100%;color:var(--text);">
+        <button onclick="startTest(state.questions)" style="display:flex;justify-content:space-between;align-items:center;padding:16px 4px;border-bottom:1px solid var(--line);background:none;border-left:none;border-right:none;border-top:none;cursor:pointer;text-align:left;width:100%;color:var(--text);">
           <div style="font-size:14px;"><b>${n}</b> ${l}</div>
           <div style="display:flex;align-items:center;gap:8px;">
             ${f>0?`<span class="pill pill-mint">${f} free</span>`:''}
@@ -219,8 +330,22 @@ function screenSeriesDetail(exam){
         </button>
       `).join('')}
     </div>
-    <button class="btn-primary" style="margin-top:20px;" onclick="go({name:'play'})">Start free test</button>
+    <button class="btn-primary" style="margin-top:20px;" onclick="startTest(state.questions)">Start free test</button>
   </div>`;
+}
+
+/* ====================== TEST PLAYER (now pulls from the full question bank, picks a random subset) ====================== */
+function startTest(allQuestions){
+  // pick up to 10 random questions for this attempt
+  const pool = [...allQuestions];
+  const picked = [];
+  const count = Math.min(10, pool.length);
+  for(let i=0;i<count;i++){
+    const idx = Math.floor(Math.random()*pool.length);
+    picked.push(pool.splice(idx,1)[0]);
+  }
+  activeQuestionSet = picked.length ? picked : SEED_QUESTIONS;
+  go({name:'play'});
 }
 
 function screenPlay(){
@@ -231,7 +356,7 @@ function screenPlay(){
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);">
       <button class="iconbtn" onclick="exitTest()">${icon('close')}</button>
       <div id="timerDisplay" style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:16px;letter-spacing:1px;">10:00</div>
-      <div id="qCounter" style="font-size:12px;color:var(--mute);">1/${QUESTIONS.length}</div>
+      <div id="qCounter" style="font-size:12px;color:var(--mute);">1/${activeQuestionSet.length}</div>
     </div>
     <div style="height:3px;background:var(--line);"><div id="qProgress" style="height:100%;width:0%;background:var(--amber);transition:width .3s;"></div></div>
     <div id="questionArea" style="flex:1;padding:24px 20px;"></div>
@@ -252,9 +377,9 @@ function startTimer(){
   },1000);
 }
 function renderQuestion(){
-  const q = QUESTIONS[testIdx];
+  const q = activeQuestionSet[testIdx];
   const area = document.getElementById('questionArea');
-  if(!area) return;
+  if(!area || !q) return;
   area.innerHTML = `
     <span class="pill pill-amber">${q.topic}</span>
     <div style="color:var(--text);font-size:17px;font-family:'Sora';font-weight:600;line-height:1.45;margin:16px 0 22px;">${q.q}</div>
@@ -269,35 +394,34 @@ function renderQuestion(){
         </button>`;
       }).join('')}
     </div>`;
-  document.getElementById('qCounter').textContent = `${testIdx+1}/${QUESTIONS.length}`;
-  document.getElementById('qProgress').style.width = `${((testIdx+1)/QUESTIONS.length)*100}%`;
-  document.getElementById('nextBtn').textContent = testIdx<QUESTIONS.length-1 ? "Save & Next" : "Submit Test";
+  document.getElementById('qCounter').textContent = `${testIdx+1}/${activeQuestionSet.length}`;
+  document.getElementById('qProgress').style.width = `${((testIdx+1)/activeQuestionSet.length)*100}%`;
+  document.getElementById('nextBtn').textContent = testIdx<activeQuestionSet.length-1 ? "Save & Next" : "Submit Test";
 }
 function selectOption(i){ testAnswers[testIdx]=i; renderQuestion(); }
 function nextQuestion(){
-  if(testIdx<QUESTIONS.length-1){ testIdx++; renderQuestion(); }
+  if(testIdx<activeQuestionSet.length-1){ testIdx++; renderQuestion(); }
   else finishTest();
 }
 function exitTest(){ clearInterval(testTimer); setNav(nav); }
 function finishTest(){
   clearInterval(testTimer);
-  // award coins for correct answers
   let correct = 0;
-  QUESTIONS.forEach((q,i)=>{ if(testAnswers[i]===q.answer) correct++; });
+  activeQuestionSet.forEach((q,i)=>{ if(testAnswers[i]===q.answer) correct++; });
   state.user.coins += correct * COINS_PER_CORRECT;
   state.user.streak += 1;
-  save();
-  go({name:'results'});
+  syncUser();
+  go({name:'results', correct});
 }
 
-function screenResults(){
+function screenResults(correctOverride){
   const byTopic = {};
-  QUESTIONS.forEach((q,i)=>{
+  activeQuestionSet.forEach((q,i)=>{
     if(!byTopic[q.topic]) byTopic[q.topic] = {correct:0,total:0};
     byTopic[q.topic].total++;
     if(testAnswers[i]===q.answer) byTopic[q.topic].correct++;
   });
-  const total = QUESTIONS.length;
+  const total = activeQuestionSet.length;
   const correctCount = Object.values(byTopic).reduce((a,b)=>a+b.correct,0);
   const weakest = Object.entries(byTopic).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total))[0];
   return `
@@ -331,6 +455,9 @@ function screenResults(){
   </div>`;
 }
 
+/* ====================== WALLET / SUBSCRIPTION / REDEEM ====================== */
+function currentMonthKey(){ const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}`; }
+
 function screenWallet(){
   const u = state.user;
   const planActive = u.plan && u.planExpiry && new Date(u.planExpiry) > new Date();
@@ -361,7 +488,7 @@ function screenWallet(){
         <button class="btn-primary" style="width:auto;padding:9px 16px;font-size:13px;" onclick="buyPlan('yearly')">Choose</button>
       </div>
     </div>
-    <div style="color:var(--mute);font-size:11.5px;text-align:center;">Demo only — no real payment is processed here.</div>
+    <div style="color:var(--mute);font-size:11.5px;text-align:center;">Demo only — wire up a real payment gateway before launch.</div>
     ` : `
     <div class="card" style="margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -406,11 +533,6 @@ function screenWallet(){
   </div>`;
 }
 
-function currentMonthKey(){
-  const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth()}`;
-}
-
 function buyPlan(type){
   const u = state.user;
   const now = new Date();
@@ -418,7 +540,7 @@ function buyPlan(type){
   else now.setFullYear(now.getFullYear()+1);
   u.plan = type;
   u.planExpiry = now.toISOString();
-  save();
+  syncUser();
   toast(`${type==='monthly'?'Monthly':'Yearly'} pass activated (demo)`);
   render();
 }
@@ -439,34 +561,28 @@ function openRedeemForm(){
       <button class="btn-primary" onclick="submitRedeem()">Submit Request</button>
     </div>`;
 }
-
 function submitRedeem(){
   const phone = document.getElementById('redeemPhone').value.trim();
   const operator = document.getElementById('redeemOperator').value;
   if(phone.length!==10){ toast("Enter a valid 10-digit number"); return; }
   const u = state.user;
-  state.redeemRequests.push({
-    id: Date.now(),
-    phone: phone,
-    operator,
-    amount: 49,
-    month: currentMonthKey(),
-    status: "Pending",
-    date: new Date().toLocaleDateString()
-  });
+  const req = { id: String(Date.now()), phone, operator, amount: 49, month: currentMonthKey(), status: "Pending", date: new Date().toLocaleDateString() };
+  state.redeemRequests.push(req);
   u.coins -= RECHARGE_THRESHOLD;
   u.lastRedeemMonth = currentMonthKey();
-  u.phone = phone;
-  save();
+  syncUser();
+  syncRedeemRequest(req);
   toast("Redeem request submitted! You'll be notified once processed.");
   setNav('wallet');
 }
 
+/* ====================== PROFILE ====================== */
 function screenProfile(){
   const u = state.user;
+  const isAdmin = u.phone === ADMIN_PHONE;
   return `
   <div style="padding:20px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);">
-    ${streakRing(64, Math.min(1,(u.coins%RECHARGE_THRESHOLD)/RECHARGE_THRESHOLD), u.streak, u.name[0]||'S')}
+    ${streakRing(64, Math.min(1,(u.coins%RECHARGE_THRESHOLD)/RECHARGE_THRESHOLD), u.streak, (u.name[0]||'S').toUpperCase())}
     <div>
       <div style="font-weight:700;font-family:'Sora';font-size:16px;">${u.name}</div>
       <div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${u.phone||'No phone set'}</div>
@@ -478,27 +594,37 @@ function screenProfile(){
       <span style="font-size:14px;">Edit name</span>
       <button class="iconbtn" onclick="editName()">${icon('chevron',16,'var(--mute)')}</button>
     </div>
+    ${isAdmin ? `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;border-bottom:1px solid var(--line);">
-      <span style="font-size:14px;">Admin panel</span>
+      <span style="font-size:14px;">Admin · Redeem Requests</span>
       <button class="iconbtn" onclick="setNav('admin')">${icon('chevron',16,'var(--mute)')}</button>
     </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;border-bottom:1px solid var(--line);">
+      <span style="font-size:14px;">Admin · Bulk Add Questions</span>
+      <button class="iconbtn" onclick="setNav('bulkadd')">${icon('chevron',16,'var(--mute)')}</button>
+    </div>` : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 4px;">
-      <span style="font-size:14px;color:var(--red);">Reset app data</span>
-      <button class="iconbtn" onclick="resetData()">${icon('chevron',16,'var(--mute)')}</button>
+      <span style="font-size:14px;color:var(--red);">Log out</span>
+      <button class="iconbtn" onclick="logOut()">${icon('chevron',16,'var(--mute)')}</button>
     </div>
-  </div>`;
+  </div>
+  ${!isAdmin ? `<div style="padding:0 16px;color:var(--mute);font-size:11px;">Admin tools are only visible to the owner phone number.</div>` : ''}
+  `;
 }
 function editName(){
   const n = prompt("Enter your name:", state.user.name);
-  if(n){ state.user.name = n; save(); render(); }
+  if(n){ state.user.name = n; syncUser(); render(); }
 }
-function resetData(){
-  if(confirm("This will erase all local progress. Continue?")){
-    state = defaultState(); save(); render();
+function logOut(){
+  if(confirm("Log out of ExamWin on this device?")){
+    LocalDB.set("examwin_phone", null);
+    currentPhone = null;
+    state.user = defaultUser();
+    location.reload();
   }
 }
 
-/* Simple owner-only admin screen — for YOU to see redeem requests */
+/* ====================== ADMIN: REDEEM REQUESTS ====================== */
 function screenAdmin(){
   const pending = state.redeemRequests.filter(r=>r.status==='Pending');
   const done = state.redeemRequests.filter(r=>r.status==='Done');
@@ -508,7 +634,7 @@ function screenAdmin(){
     <div style="font-family:'Sora';font-weight:700;font-size:15px;">Admin · Redeem Requests</div>
   </div>
   <div style="padding:16px;">
-    <div style="color:var(--mute);font-size:12px;margin-bottom:14px;">This list is stored only on this device. When you see a pending request, manually recharge that number from your Paytm, then mark it Done here.</div>
+    <div style="color:var(--mute);font-size:12px;margin-bottom:14px;">When you see a pending request, manually recharge that number from your Paytm, then mark it Done here.</div>
     <h2 class="section">Pending (${pending.length})</h2>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
       ${pending.length===0?`<div style="color:var(--mute);font-size:12.5px;">No pending requests.</div>`:
@@ -519,7 +645,7 @@ function screenAdmin(){
               <div style="font-weight:700;font-size:14px;">${r.phone} · ${r.operator}</div>
               <div style="color:var(--mute);font-size:11.5px;margin-top:2px;">₹${r.amount} pack · requested ${r.date}</div>
             </div>
-            <button class="pill pill-mint" style="border:none;cursor:pointer;" onclick="markDone(${r.id})">Mark Done</button>
+            <button class="pill pill-mint" style="border:none;cursor:pointer;" onclick="markDone('${r.id}')">Mark Done</button>
           </div>
         </div>
       `).join('')}
@@ -532,7 +658,62 @@ function screenAdmin(){
 }
 function markDone(id){
   const r = state.redeemRequests.find(x=>x.id===id);
-  if(r){ r.status = 'Done'; save(); render(); }
+  if(r){ r.status = 'Done'; saveLocal(); syncMarkDone(id); render(); }
+}
+
+/* ====================== ADMIN: BULK ADD QUESTIONS ====================== */
+function screenBulkAdd(){
+  return `
+  <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);">
+    <button class="iconbtn" onclick="setNav('profile')">${icon('back')}</button>
+    <div style="font-family:'Sora';font-weight:700;font-size:15px;">Bulk Add Questions</div>
+  </div>
+  <div style="padding:16px;">
+    <div class="card" style="margin-bottom:14px;">
+      <div style="font-weight:700;font-family:'Sora';font-size:13px;margin-bottom:8px;">Format — one question per line</div>
+      <div style="color:var(--mute);font-size:12px;line-height:1.6;">
+        Topic | Question | Option1 | Option2 | Option3 | Option4 | CorrectNumber(1-4)
+      </div>
+      <div style="color:var(--mute);font-size:11.5px;margin-top:8px;background:var(--surface2);padding:8px;border-radius:8px;font-family:'JetBrains Mono',monospace;">
+        Percentage | 20% of 250 is? | 40 | 50 | 60 | 70 | 2
+      </div>
+    </div>
+    <textarea id="bulkText" placeholder="Paste your questions here, one per line, using the format above..."></textarea>
+    <div style="color:var(--mute);font-size:11.5px;margin:8px 0 16px;">Currently <b style="color:var(--text);">${state.questions.length}</b> questions in the bank.</div>
+    <button class="btn-primary" onclick="processBulkAdd()">Add These Questions</button>
+    <button class="btn-ghost" style="margin-top:10px;" onclick="clearAllQuestions()">Clear all questions</button>
+    <div id="bulkResult" style="margin-top:14px;"></div>
+  </div>`;
+}
+function processBulkAdd(){
+  const raw = document.getElementById('bulkText').value;
+  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  let added = 0, errors = [];
+  lines.forEach((line, i)=>{
+    const parts = line.split('|').map(p=>p.trim());
+    if(parts.length !== 7){ errors.push(`Line ${i+1}: needs 7 parts separated by |`); return; }
+    const [topic, q, o1, o2, o3, o4, correctStr] = parts;
+    const correctNum = parseInt(correctStr, 10);
+    if(isNaN(correctNum) || correctNum<1 || correctNum>4){ errors.push(`Line ${i+1}: correct answer must be 1-4`); return; }
+    state.questions.push({ topic, q, options:[o1,o2,o3,o4], answer: correctNum-1 });
+    added++;
+  });
+  syncQuestions();
+  const result = document.getElementById('bulkResult');
+  result.innerHTML = `
+    <div class="card" style="border-color:${errors.length?'var(--red)':'var(--mint)'};">
+      <div style="color:${errors.length?'var(--red)':'var(--mint)'};font-weight:700;font-size:13px;">${added} questions added${errors.length?`, ${errors.length} lines had errors`:''}</div>
+      ${errors.length ? `<div style="color:var(--mute);font-size:11.5px;margin-top:8px;">${errors.slice(0,5).join('<br/>')}</div>` : ''}
+    </div>`;
+  document.getElementById('bulkText').value = '';
+  toast(`${added} questions added to the bank`);
+}
+function clearAllQuestions(){
+  if(confirm("Delete ALL questions in the bank? This cannot be undone.")){
+    state.questions = [];
+    syncQuestions();
+    render();
+  }
 }
 
 /* ====================== TOAST ====================== */
@@ -567,12 +748,16 @@ function bottomNav(){
 /* ====================== MAIN RENDER ====================== */
 function render(){
   const app = document.getElementById('app');
+
+  if(!currentPhone){ app.innerHTML = screenLogin(); return; }
+
   let body = '', title = 'ExamWin', showChrome = true;
 
   if(screen.name==='series'){ body = screenSeriesDetail(screen.exam); showChrome=false; }
   else if(screen.name==='play'){ body = screenPlay(); showChrome=false; }
   else if(screen.name==='results'){ body = screenResults(); showChrome=false; }
   else if(screen.name==='admin'){ body = screenAdmin(); showChrome=false; }
+  else if(screen.name==='bulkadd'){ body = screenBulkAdd(); showChrome=false; }
   else if(nav==='home'){ body = screenHome(); title='ExamWin'; }
   else if(nav==='explore'){ body = screenExplore(); title='Explore exams'; }
   else if(nav==='wallet'){ body = screenWallet(); title='Wallet'; }
@@ -583,10 +768,15 @@ function render(){
     <div class="screen">${body}</div>
     ${showChrome ? bottomNav() : ''}
   `;
-  if(nav==='explore' && screen.name==='explore') renderExploreList();
+  if(nav==='explore' && screen.name.name==='explore') renderExploreList();
 }
 
-render();
+/* ====================== BOOT ====================== */
+if(currentPhone){
+  loadFromFirebase(()=>render());
+} else {
+  render();
+}
 </script>
 </body>
 </html>
